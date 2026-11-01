@@ -15,7 +15,7 @@ It needs `FATSECRET_CONSUMER_KEY`, `FATSECRET_CONSUMER_SECRET` and `FATSECRET_MC
 - A full run (the first, or `--full`) reads month totals backwards from this month until six months in a row are empty, then reads only the days that have entries. Days cleared in the app leave the catalog.
 - Requests are paced as the server paces them. After error 12 (too many actions) the same request is sent again after one minute, then two, four, up to 32; a run stops after that and keeps what it read.
 - `--budget` caps the requests in one run, 3,000 by default, out of FatSecret's 5,000 a day. A run that stops for any reason, the budget included, carries on where it stopped when started again.
-- `--classify` calls `food.get` once for each Food not checked before: error 106 marks it regional. Checks are shared by everyone in the Household.
+- `--classify` calls `food.get` once for each Food not checked before: error 106 marks it regional. Checks are shared by everyone in the Household. It is optional: logging from the catalog needs no `food.get`, and `catalog.lookup.catalog_food` checks a Food the first time a tool needs its catalog data, then remembers the answer the same way.
 
 ## What it keeps
 

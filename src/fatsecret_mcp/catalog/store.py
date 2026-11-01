@@ -366,6 +366,12 @@ class CatalogStore:
 
         return [row["food_id"] for row in rows]
 
+    def is_regional(self, food_id: str) -> bool | None:
+        """Whether FatSecret's catalog can't return this Food to the API key; None when not checked yet."""
+        row = self._db.execute("SELECT is_regional FROM food_checks WHERE food_id = ?", (food_id,)).fetchone()
+
+        return None if row is None else bool(row["is_regional"])
+
     def record_check(self, food_id: str, *, is_regional: bool, checked_on: date) -> None:
         with self._db:
             self._db.execute(
