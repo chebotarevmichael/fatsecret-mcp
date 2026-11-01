@@ -1,0 +1,86 @@
+{
+  "description": "Food Entries for a Diary Day with four regional Foods, typed in grams in the Russian-language app; none of them can be fetched with food.get on a Basic key.",
+  "source": "recorded",
+  "recorded_on": "2026-11-01",
+  "request": {
+    "http_method": "GET",
+    "url": "https://platform.fatsecret.com/rest/server.api",
+    "params": {
+      "method": "food_entries.get.v2",
+      "format": "json",
+      "date": "20500"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json; charset=utf-8",
+    "json": {
+      "food_entries": {
+        "food_entry": [
+          {
+            "calories": "207",
+            "carbohydrate": "24.34",
+            "date_int": "20500",
+            "fat": "10.80",
+            "fiber": "0",
+            "food_entry_description": "0.39 :custom:39 г Печенье Овсяное",
+            "food_entry_id": "9000101",
+            "food_entry_name": "Печенье Овсяное",
+            "food_id": "90000101",
+            "meal": "Breakfast",
+            "number_of_units": "0.390",
+            "protein": "2.81",
+            "saturated_fat": "0",
+            "serving_id": "90000201",
+            "sodium": "0",
+            "sugar": "0",
+            "trans_fat": "0.040"
+          },
+          {
+            "calories": "34",
+            "carbohydrate": "0",
+            "date_int": "20500",
+            "fat": "2.08",
+            "food_entry_description": "0.13 :custom:13 г Домашний Курт",
+            "food_entry_id": "9000102",
+            "food_entry_name": "Домашний Курт",
+            "food_id": "90000102",
+            "meal": "Breakfast",
+            "number_of_units": "0.130",
+            "protein": "3.25",
+            "serving_id": "90000202"
+          },
+          {
+            "calories": "163",
+            "carbohydrate": "11.55",
+            "date_int": "20500",
+            "fat": "9.45",
+            "food_entry_description": "5 1/4 :custom:525s  г СТЕПНОЙ АЙРАН Айран",
+            "food_entry_id": "9000103",
+            "food_entry_name": "СТЕПНОЙ АЙРАН Айран",
+            "food_id": "90000103",
+            "meal": "Breakfast",
+            "number_of_units": "5.250",
+            "protein": "7.35",
+            "serving_id": "90000203"
+          },
+          {
+            "calories": "374",
+            "carbohydrate": "45.05",
+            "date_int": "20500",
+            "fat": "18.70",
+            "food_entry_description": "0.85 :custom:85 г Восточная Лапша с Говядиной",
+            "food_entry_id": "9000104",
+            "food_entry_name": "Восточная Лапша с Говядиной",
+            "food_id": "90000104",
+            "meal": "Breakfast",
+            "number_of_units": "0.850",
+            "protein": "6.46",
+            "serving_id": "90000204",
+            "sodium": "2065"
+          }
+        ]
+      }
+    }
+  }
+}

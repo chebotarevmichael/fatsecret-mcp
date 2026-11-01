@@ -50,6 +50,10 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "PT", "ASYNC"]
 
+[tool.ruff.lint.per-file-ignores]
+# Russian Food names from recorded Food Diaries are the test data, not look-alike Latin letters.
+"tests/catalog/*" = ["RUF001", "RUF003"]
+
 [tool.pyright]
 include = ["src", "tests"]
 pythonVersion = "3.13"
