@@ -5,12 +5,14 @@ Heavy modules are imported only when needed, so the HTTP server starts quickly a
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Literal
 
 from fatsecret_mcp.config.loader import acting_user, load_household, validate_http_household
 
 if TYPE_CHECKING:
+    from fatsecret_mcp.catalog.store import CatalogStore
     from fatsecret_mcp.config.models import Household, User
 
 Transport = Literal["stdio", "http"]
@@ -22,12 +24,29 @@ async def serve(environ: Mapping[str, str], *, transport: Transport, host: str, 
     if transport == "http":
         validate_http_household(household)
 
-        await _serve_http(household, host, port)
-    else:
-        await _serve_stdio(household, acting_user(household, environ))
+    with _catalog(environ) as catalog:
+        if transport == "http":
+            await _serve_http(household, host, port, catalog)
+        else:
+            await _serve_stdio(household, acting_user(household, environ), catalog)
 
 
-async def _serve_stdio(household: Household, user: User) -> None:
+@contextmanager
+def _catalog(environ: Mapping[str, str]) -> Generator[CatalogStore | None]:
+    """The catalog `sync-catalog` filled, when there is one; the server never creates it."""
+    from fatsecret_mcp.catalog.store import CatalogStore, database_path
+
+    path = database_path(environ)
+
+    if not path.is_file():
+        yield None
+        return
+
+    with CatalogStore.open(path) as catalog:
+        yield catalog
+
+
+async def _serve_stdio(household: Household, user: User, catalog: CatalogStore | None) -> None:
     from fatsecret_mcp.domain.diary_day import system_clock
     from fatsecret_mcp.fatsecret.budget import daily_budget
     from fatsecret_mcp.fatsecret.client import connected_api
@@ -43,19 +62,24 @@ async def _serve_stdio(household: Household, user: User) -> None:
             signing_key=household.signing_key,
             daily_requests=daily_budget(len(household.users)),
             food_cache=food_cache,
+            catalog=catalog,
         )
 
         await server.run_stdio_async()
 
 
-async def _serve_http(household: Household, host: str, port: int) -> None:
+async def _serve_http(household: Household, host: str, port: int, catalog: CatalogStore | None) -> None:
     import uvicorn
 
     from fatsecret_mcp.fatsecret.client import connected_api
     from fatsecret_mcp.http import build_http_app
 
     async with connected_api(household.consumer) as fatsecret:
-        app = build_http_app(household, fatsecret)
+        # Without a catalog the app is built exactly as before it existed.
+        if catalog is None:
+            app = build_http_app(household, fatsecret)
+        else:
+            app = build_http_app(household, fatsecret, catalog=catalog)
         config = uvicorn.Config(
             app=app,
             host=host,

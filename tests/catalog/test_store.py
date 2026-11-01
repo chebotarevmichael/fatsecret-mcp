@@ -1,4 +1,4 @@
-"""The catalog file: the User's own values win over their entries and outlast a rebuild."""
+"""The catalog file: the User's label values settle a review and outlast a rebuild."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from tests.fatsecret.fake import food_entry
 DAY = date(2026, 10, 1)
 
 
-def test_the_users_values_override_the_entries_until_they_change_them(tmp_path: Path) -> None:
+def test_the_users_label_values_are_kept_beside_the_logged_ones(tmp_path: Path) -> None:
     store = CatalogStore(sqlite3.connect(tmp_path / "catalog.sqlite3"))
 
     for day, kcal in ((date(2026, 5, 1), 113), (date(2026, 5, 2), 113), (DAY, 169)):
@@ -28,9 +28,8 @@ def test_the_users_values_override_the_entries_until_they_change_them(tmp_path: 
     store.rebuild_items("michael")
     before = store.items("michael")[0]
 
-    store.set_override(
-        "michael", "90000105", "90000205", Nutrition(kcal=150, protein=30, fat=3, carbohydrate=1), DAY
-    )
+    given = Nutrition(kcal=150, protein=30, fat=3, carbohydrate=1)
+    store.set_override("michael", "90000105", "90000205", given, DAY)
     store.rebuild_items("michael")
     after = store.items("michael")[0]
 
@@ -39,8 +38,10 @@ def test_the_users_values_override_the_entries_until_they_change_them(tmp_path: 
         NutritionSource.LATEST,
         True,
     )
-    assert after.per_serving == Nutrition(kcal=150, protein=30, fat=3, carbohydrate=1)
-    assert (after.source, after.needs_review) == (NutritionSource.OVERRIDE, False)
+    # FatSecret still logs its own values; the User's are kept beside them and settle the review.
+    assert after.per_serving == before.per_serving
+    assert after.label_per_serving == given
+    assert not after.needs_review
 
 
 def test_items_from_an_earlier_schema_are_rebuilt(tmp_path: Path) -> None:

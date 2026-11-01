@@ -185,6 +185,7 @@ async def test_a_nutrition_label_picks_the_closest_catalog_food_and_matches_kcal
                 "estimated": False,
             },
             "repeated_from": None,
+            "my_food": None,
         }
     ]
     assert proposed["totals"] == {"kcal": 190, "protein": 15.8, "fat": 6.3, "carbohydrate": 19.0}

@@ -7,6 +7,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Added
 
 - `fatsecret-mcp sync-catalog`: a local catalog of the Foods and Servings each person has logged, read from their own Food Diary into SQLite in `FATSECRET_MCP_DATA_DIR`. It covers Foods a Basic key can't search or fetch, such as regional Brand Foods, and `--classify` marks which ones those are. See [docs/catalog.md](docs/catalog.md).
+- `search_my_foods` and My Food items in `draft_entries`: find what you logged before, in your own language, and log it again in grams, regional products included. `set_my_food_nutrition` keeps your label's values for a Food whose FatSecret data seems to have changed. They're offered when the catalog file exists.
 
 ## [0.3.0] - 2026-10-29
 

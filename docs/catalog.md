@@ -17,6 +17,18 @@ It needs `FATSECRET_CONSUMER_KEY`, `FATSECRET_CONSUMER_SECRET` and `FATSECRET_MC
 - `--budget` caps the requests in one run, 3,000 by default, out of FatSecret's 5,000 a day. A run that stops for any reason, the budget included, carries on where it stopped when started again.
 - `--classify` calls `food.get` once for each Food not checked before: error 106 marks it regional. Checks are shared by everyone in the Household. It is optional: logging from the catalog needs no `food.get`, and `catalog.lookup.catalog_food` checks a Food the first time a tool needs its catalog data, then remembers the answer the same way.
 
+## Using it
+
+When the catalog file exists, `serve` opens it and offers two more tools; without it the server is unchanged.
+
+- `search_my_foods` finds what you logged before, by a few words of its name or brand in your own language, with no FatSecret request. Regional products come up here although `search_foods` can't find them.
+- `draft_entries` takes a My Food item, `{"from_my_foods": true, "food_id": …, "serving_id": …, "metric_amount": 150}`, or `number_of_units` for a Serving without a known weight. It goes through the same Draft and `confirm_draft` as any other item, and is written with `food_entry.create` by its ids.
+- `set_my_food_nutrition` keeps your label's values per 100 g for an Item that needs review, or `keep_current=true`. FatSecret still logs its own values, so the Draft shows yours beside them with the difference.
+
+`catalog.lookup.catalog_food` fetches a Food from FatSecret's catalog only when a tool needs more than the catalog holds, and remembers a regional Food so it isn't requested again.
+
+Run `sync-catalog` now and then, or after logging in the app, to pick up new Foods; the server reads the catalog but doesn't sync it.
+
 ## What it keeps
 
 One SQLite file, `catalog.sqlite3`, in `FATSECRET_MCP_DATA_DIR` (by default `./data`; `/data` in the container image, which declares it a volume).

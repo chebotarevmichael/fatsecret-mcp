@@ -11,6 +11,8 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import CallToolResult, ToolAnnotations
 from pydantic import SecretStr
 
+from fatsecret_mcp.catalog.drafting import my_food_item
+from fatsecret_mcp.catalog.store import CatalogStore
 from fatsecret_mcp.config.models import User
 from fatsecret_mcp.domain.diary_day import Clock, today
 from fatsecret_mcp.domain.draft_token import seal_draft
@@ -68,6 +70,7 @@ from fatsecret_mcp.tools.schemas import (
     EntryChangeDraftInput,
     FoodDraft,
     FoodDraftInput,
+    MyFoodDraftInput,
     NutritionLabelDraftInput,
     OtherDayAfter,
     ProposedChange,
@@ -77,7 +80,7 @@ from fatsecret_mcp.tools.schemas import (
 
 # The entries of each Diary Day that a Draft's items repeat from or change.
 DiaryDays = dict[date, list[FoodEntry]]
-AdditionInput = FoodDraftInput | NutritionLabelDraftInput | DiaryEntryDraftInput
+AdditionInput = FoodDraftInput | NutritionLabelDraftInput | DiaryEntryDraftInput | MyFoodDraftInput
 
 
 def register(
@@ -88,6 +91,7 @@ def register(
     diary: UserDiary,
     clock: Clock,
     signing_key: SecretStr,
+    catalog: CatalogStore | None = None,
 ) -> None:
     annotations = ToolAnnotations(
         title="Draft Entries",
@@ -126,6 +130,14 @@ def register(
         of. Then draft the chosen entries by diary_day and food_entry_id, with metric_amount for a
         changed amount in grams or ml.
 
+        A My Food item logs a Food and Serving from the User's own catalog by the ids search_my_foods
+        gave, with from_my_foods=true and metric_amount in grams or ml, or number_of_units for a
+        Serving without a known weight. It works for regional Foods search_foods can't find, and is
+        named as the User logged it before. FatSecret logs its own nutrition for it, which the Draft
+        shows. When its my_food.needs_review is true, ask the User for the label's kcal and Macros
+        per 100 g before confirming, save them with set_my_food_nutrition and draft again; if they
+        don't have them, call set_my_food_nutrition with keep_current=true and confirm as drafted.
+
         A change item changes or removes a Food Entry already in the Food Diary, by diary_day and
         food_entry_id: change="remove", or change="edit" with a new metric_amount in grams or ml,
         a meal on the same Diary Day or a food_entry_name. For "undo that" after a confirm_draft,
@@ -148,6 +160,7 @@ def register(
         now = clock()
         user_today = today(now, user.timezone)
         additions_input, changes_input = _additions_and_changes(items)
+        my_foods = _MyFoods(catalog, user.id)
         has_additions = bool(additions_input)
 
         if not has_additions and (meal is not None or diary_day is not None):
@@ -174,7 +187,7 @@ def register(
             diary_days = await _diary_days(items, diary, user_today)
 
             for item in additions_input:
-                prepared.append(await _prepared_item(item, fatsecret, food_cache, diary_days))
+                prepared.append(await _prepared_item(item, fatsecret, food_cache, diary_days, my_foods))
 
             for item in changes_input:
                 changes.append(await _prepared_change(item, fatsecret, food_cache, diary_days))
@@ -299,12 +312,43 @@ def _removal_note(changes: list[DraftChange]) -> str | None:
     return REMOVAL_NOTE if removals else None
 
 
+class _MyFoods:
+    """The acting User's catalog, when the server has one."""
+
+    def __init__(self, catalog: CatalogStore | None, user_id: str) -> None:
+        self._catalog = catalog
+        self._user_id = user_id
+
+    def item(self, item: MyFoodDraftInput) -> DraftItem:
+        if self._catalog is None:
+            raise InvalidDraftItem("This server keeps no catalog of the User's Foods. Use search_foods.")
+
+        found = self._catalog.item(self._user_id, item.food_id, item.serving_id)
+
+        if found is None:
+            raise InvalidDraftItem(
+                "Unknown My Food: use the food_id and serving_id of a search_my_foods match."
+            )
+
+        return my_food_item(
+            found,
+            metric_amount=item.metric_amount,
+            number_of_units=item.number_of_units,
+            name=item.food_entry_name,
+            assumption=item.assumption,
+        )
+
+
 async def _prepared_item(
     item: AdditionInput,
     fatsecret: FatSecretGateway,
     food_cache: FoodCache,
     diary_days: DiaryDays,
+    my_foods: _MyFoods,
 ) -> DraftItem:
+    if isinstance(item, MyFoodDraftInput):
+        return my_foods.item(item)
+
     if isinstance(item, NutritionLabelDraftInput):
         return await _stand_in(item, fatsecret, food_cache)
 

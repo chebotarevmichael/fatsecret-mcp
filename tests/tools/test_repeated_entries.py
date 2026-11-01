@@ -162,6 +162,7 @@ async def test_repeating_yesterdays_breakfast_reads_yesterday_once_and_searches_
         "catalog_name": None,
         "stand_in": None,
         "repeated_from": {"diary_day": "2026-10-13", "meal": "breakfast"},
+        "my_food": None,
     }
     assert first["totals"] == {"kcal": 705, "protein": 39.5, "fat": 21, "carbohydrate": 88}
     # The source's Meal isn't copied: noon suggests lunch, and Claude asks about it.

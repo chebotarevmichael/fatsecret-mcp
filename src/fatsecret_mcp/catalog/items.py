@@ -4,7 +4,8 @@ A Food Entry holds nutrition for its number of units of a Serving, so one Servin
 entry's divided by its units. FatSecret rounds each entry's kcal, so entries of a few grams disagree
 by a few kcal per Serving, and their median is kept. When they disagree beyond rounding, the Food's
 data most likely changed on FatSecret, so the latest loggings are kept instead; if those differ from
-the median, the Item needs review by the User, whose own values then override both.
+the median, the Item needs review by the User. Values the User gives are kept beside the logged ones:
+FatSecret computes each entry's nutrition from its own Food data, whatever the catalog holds.
 """
 
 from __future__ import annotations
@@ -40,8 +41,6 @@ class NutritionSource(StrEnum):
     """Every logging agrees within rounding."""
     LATEST = "latest"
     """Loggings disagree: the latest ones that agree with each other."""
-    OVERRIDE = "override"
-    """Values the User gave."""
 
 
 @dataclass(frozen=True)
@@ -78,6 +77,8 @@ class CatalogItem:
     source: NutritionSource = NutritionSource.MEDIAN
     needs_review: bool = False
     """Loggings disagree and the latest differ from their median: the User should confirm the values."""
+    label_per_serving: Nutrition | None = None
+    """The User's own values for one Serving, from its label. FatSecret logs its own values regardless."""
     is_regional: bool | None = None
     """True when FatSecret's catalog can't return the Food to this API key; None until checked."""
 

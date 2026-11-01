@@ -3,7 +3,8 @@
 - `catalog_entries`: every Food Entry read from a User's Food Diary, as one logging of a Serving.
   A Diary Day read again replaces its entries, so edits and deletions in the app carry over.
 - `catalog_items`: one row per User, Food and Serving, rebuilt from `catalog_entries`.
-- `catalog_overrides`: nutrition per Serving the User gave for an Item, which wins over their entries.
+- `catalog_overrides`: nutrition per Serving the User gave for an Item from its label, shown beside the
+  values FatSecret logs; giving them settles the Item's review.
 - `food_checks`: whether FatSecret's catalog returns a Food to this API key. Shared by Users, since the
   catalog is the same for all of them; each Food is checked once.
 - `sync_days` and `sync_state`: how far a sync got, so an interrupted one carries on where it stopped.
@@ -35,6 +36,7 @@ from fatsecret_mcp.domain.models import Nutrition
 DATA_DIR_VAR = "FATSECRET_MCP_DATA_DIR"
 DEFAULT_DATA_DIR = Path("data")
 DATABASE_NAME = "catalog.sqlite3"
+ITEM_COLUMNS = 22
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_entries (
@@ -74,6 +76,10 @@ CREATE TABLE IF NOT EXISTS catalog_items (
     last_seen TEXT NOT NULL,
     source TEXT NOT NULL,
     needs_review INTEGER NOT NULL,
+    label_kcal REAL,
+    label_protein REAL,
+    label_fat REAL,
+    label_carbohydrate REAL,
     is_regional INTEGER,
     PRIMARY KEY (user, food_id, serving_id)
 );
@@ -159,14 +165,19 @@ class CatalogStore:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._db = connection
         self._db.row_factory = sqlite3.Row
-        self._drop_outdated_items()
+        outdated = self._drop_outdated_items()
         self._db.executescript(SCHEMA)
+
+        if outdated:
+            for row in self._db.execute("SELECT DISTINCT user FROM catalog_entries").fetchall():
+                self.rebuild_items(row["user"])
 
     @classmethod
     @contextmanager
     def open(cls, path: Path) -> Generator[CatalogStore]:
         path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(path)
+        # The server's tools run on its event loop, but anyio may hand a call to a worker thread.
+        connection = sqlite3.connect(path, check_same_thread=False)
 
         try:
             yield cls(connection)
@@ -304,12 +315,10 @@ class CatalogStore:
 
         for observations in by_serving.values():
             item, spread = catalog_item(observations)
-            override = overrides.get((item.food_id, item.serving_id))
+            label = overrides.get((item.food_id, item.serving_id))
 
-            if override is not None:
-                item = replace(
-                    item, per_serving=override, source=NutritionSource.OVERRIDE, needs_review=False
-                )
+            if label is not None:
+                item = replace(item, label_per_serving=label, needs_review=False)
 
             items.append(item)
 
@@ -319,7 +328,7 @@ class CatalogStore:
         with self._db:
             self._db.execute("DELETE FROM catalog_items WHERE user = ?", (user,))
             self._db.executemany(
-                "INSERT INTO catalog_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                f"INSERT INTO catalog_items VALUES ({', '.join('?' * ITEM_COLUMNS)})",
                 [_item_row(user, item, checks.get(item.food_id)) for item in items],
             )
 
@@ -337,7 +346,7 @@ class CatalogStore:
     def set_override(
         self, user: str, food_id: str, serving_id: str, per_serving: Nutrition, set_on: date
     ) -> None:
-        """Keep the User's own nutrition for one Serving; the next rebuild uses it."""
+        """Keep the User's own nutrition for one Serving, from its label; it settles the Item's review."""
         with self._db:
             self._db.execute(
                 "INSERT OR REPLACE INTO catalog_overrides VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -352,6 +361,14 @@ class CatalogStore:
                     set_on.isoformat(),
                 ),
             )
+
+    def item(self, user: str, food_id: str, serving_id: str) -> CatalogItem | None:
+        row = self._db.execute(
+            "SELECT * FROM catalog_items WHERE user = ? AND food_id = ? AND serving_id = ?",
+            (user, food_id, serving_id),
+        ).fetchone()
+
+        return None if row is None else _item(row)
 
     def unchecked_food_ids(self, user: str) -> list[str]:
         """The User's Foods not yet checked against FatSecret's catalog, most logged first."""
@@ -387,13 +404,17 @@ class CatalogStore:
 
         return {(row["food_id"], row["serving_id"]): _nutrition(row) for row in rows}
 
-    def _drop_outdated_items(self) -> None:
+    def _drop_outdated_items(self) -> bool:
         """`catalog_items` is rebuilt from the entries, so a table from an earlier schema is just dropped."""
         columns = {row["name"] for row in self._db.execute("PRAGMA table_info(catalog_items)")}
 
-        if columns and "needs_review" not in columns:
-            with self._db:
-                self._db.execute("DROP TABLE catalog_items")
+        if not columns or "label_kcal" in columns:
+            return False
+
+        with self._db:
+            self._db.execute("DROP TABLE catalog_items")
+
+        return True
 
     def _checks(self) -> dict[str, bool]:
         rows = self._db.execute("SELECT food_id, is_regional FROM food_checks")
@@ -440,6 +461,7 @@ def _item(row: sqlite3.Row) -> CatalogItem:
         last_seen=date.fromisoformat(row["last_seen"]),
         source=NutritionSource(row["source"]),
         needs_review=bool(row["needs_review"]),
+        label_per_serving=_label(row),
         is_regional=None if regional is None else bool(regional),
     )
 
@@ -463,8 +485,28 @@ def _item_row(user: str, item: CatalogItem, is_regional: bool | None) -> tuple[A
         item.last_seen.isoformat(),
         item.source.value,
         int(item.needs_review),
+        *(_label_values(item.label_per_serving)),
         None if is_regional is None else int(is_regional),
     )
+
+
+def _label(row: sqlite3.Row) -> Nutrition | None:
+    if row["label_kcal"] is None:
+        return None
+
+    return Nutrition(
+        kcal=row["label_kcal"],
+        protein=row["label_protein"],
+        fat=row["label_fat"],
+        carbohydrate=row["label_carbohydrate"],
+    )
+
+
+def _label_values(label: Nutrition | None) -> tuple[float | None, ...]:
+    if label is None:
+        return (None, None, None, None)
+
+    return (label.kcal, label.protein, label.fat, label.carbohydrate)
 
 
 def _nutrition(row: sqlite3.Row) -> Nutrition:

@@ -31,6 +31,7 @@ from starlette.types import Receive, Scope, Send
 
 from fatsecret_mcp.auth.connector import ConnectorAuth
 from fatsecret_mcp.auth.models import AccessClaims
+from fatsecret_mcp.catalog.store import CatalogStore
 from fatsecret_mcp.config.loader import validate_http_household
 from fatsecret_mcp.config.models import Household, User
 from fatsecret_mcp.domain.diary_day import Clock, system_clock
@@ -58,6 +59,7 @@ def build_http_app(
     *,
     clock: Clock = system_clock,
     metadata_http: httpx2.AsyncClient | None = None,
+    catalog: CatalogStore | None = None,
 ) -> Starlette:
     validate_http_household(household)
 
@@ -74,6 +76,7 @@ def build_http_app(
         food_cache=food_cache,
         clock=clock,
         auth=auth,
+        catalog=catalog,
     )
     base_url = auth.identity.base_url
     routes = create_protected_resource_routes(
@@ -153,8 +156,10 @@ class _UserServers:
         food_cache: FoodCache,
         clock: Clock,
         auth: ConnectorAuth,
+        catalog: CatalogStore | None = None,
     ) -> None:
         self.household = household
+        self.catalog = catalog
         self.fatsecret = fatsecret
         self.food_cache = food_cache
         self.clock = clock
@@ -213,6 +218,7 @@ class _UserServers:
             daily_requests=daily_budget(len(self.household.users)),
             food_cache=self.food_cache,
             icons=server_icons(self.auth.identity.base_url),
+            catalog=self.catalog,
         )
         security = TransportSecuritySettings(
             allowed_hosts=[urlsplit(self.auth.identity.base_url).netloc],

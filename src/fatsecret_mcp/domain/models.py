@@ -191,6 +191,20 @@ class DraftItem:
     """Set when the entry logs a catalog Food in place of a product missing from the catalog."""
     repeated_from: RepeatedFrom | None = None
     """Set when the entry logs a Food Entry from the Food Diary again."""
+    my_food: MyFood | None = None
+    """Set when the entry logs a Food and Serving from the User's own catalog."""
+
+
+@dataclass(frozen=True)
+class MyFood:
+    """A Food and Serving from the User's catalog, as logged before."""
+
+    times_logged: int
+    last_logged: date
+    needs_review: bool
+    """The Food's data seems to have changed on FatSecret: ask the User for its current label."""
+    label_for_amount: Nutrition | None
+    """The User's own values for the amount logged; FatSecret still logs its own."""
 
 
 @dataclass(frozen=True)

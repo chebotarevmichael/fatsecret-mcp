@@ -71,6 +71,12 @@ def request_limits(request_clock: FakeRequestClock) -> RequestLimits:
     )
 
 
+@pytest.fixture(autouse=True)
+def no_operator_catalog(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run every test outside the checkout, so a catalog the Operator synced in ./data isn't read."""
+    monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"

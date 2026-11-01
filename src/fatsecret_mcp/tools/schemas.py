@@ -14,6 +14,7 @@ from typing import Annotated, Any, Literal
 from mcp_types import CallToolResult, TextContent
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
 
+from fatsecret_mcp.catalog.items import CatalogItem
 from fatsecret_mcp.domain.models import (
     Confirmation,
     ConfirmedChange,
@@ -27,6 +28,7 @@ from fatsecret_mcp.domain.models import (
     Food,
     FoodEntry,
     Meal,
+    MyFood,
     Nutrition,
     NutritionLabel,
     PeriodDaySummary,
@@ -120,6 +122,37 @@ class NutritionLabelValues(BaseModel):
         return NutritionLabel(per_100_g=per_100_g, estimated=self.estimated)
 
 
+class MyFoodDraftInput(BaseModel):
+    """A Food and Serving from the User's own catalog, logged again by their ids."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    from_my_foods: Literal[True] = Field(description="Always true: the ids come from search_my_foods.")
+    food_id: CatalogId
+    serving_id: CatalogId
+    metric_amount: float | None = Field(
+        default=None,
+        gt=0,
+        le=10000,
+        allow_inf_nan=False,
+        description="Grams eaten, or ml for a Serving in ml. Needs the Serving's metric_amount.",
+    )
+    number_of_units: float | None = Field(
+        default=None,
+        gt=0,
+        le=10000,
+        allow_inf_nan=False,
+        description="Servings eaten, for a Serving without a known weight. Give this or metric_amount.",
+    )
+    food_entry_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_NAME_LENGTH,
+        description="The entry's name; omit to use the name the User logged it under before.",
+    )
+    assumption: Assumption = None
+
+
 class NutritionLabelDraftInput(BaseModel):
     """A product missing from the catalog, logged as a Stand-in under its own name."""
 
@@ -211,7 +244,7 @@ NUTRITION_LABEL_ITEM_FIELDS = {"product_name", "nutrition_label", "grams", "sear
 
 
 def _draft_item_kind(item: Any) -> str:
-    """Tells the four kinds of item apart by the fields only one kind of item has."""
+    """Tells the five kinds of item apart by the fields only one kind of item has."""
     if isinstance(item, NutritionLabelDraftInput):
         return "nutrition_label"
 
@@ -220,6 +253,9 @@ def _draft_item_kind(item: Any) -> str:
 
     if isinstance(item, DiaryEntryDraftInput):
         return "diary_entry"
+
+    if isinstance(item, MyFoodDraftInput):
+        return "my_food"
 
     if isinstance(item, dict):
         present = [field in item for field in NUTRITION_LABEL_ITEM_FIELDS]
@@ -233,6 +269,9 @@ def _draft_item_kind(item: Any) -> str:
         if "food_entry_id" in item:
             return "diary_entry"
 
+        if "from_my_foods" in item:
+            return "my_food"
+
     return "food"
 
 
@@ -240,6 +279,7 @@ DraftItemInput = Annotated[
     Annotated[FoodDraftInput, Tag("food")]
     | Annotated[NutritionLabelDraftInput, Tag("nutrition_label")]
     | Annotated[DiaryEntryDraftInput, Tag("diary_entry")]
+    | Annotated[MyFoodDraftInput, Tag("my_food")]
     | Annotated[EntryChangeDraftInput, Tag("entry_change")],
     Discriminator(_draft_item_kind),
 ]
@@ -447,6 +487,90 @@ class RepeatedFromDetails(BaseModel):
         )
 
 
+class MyFoodDetails(BaseModel):
+    times_logged: int
+    last_logged: date
+    needs_review: bool = Field(
+        description="FatSecret's data for this Food seems to have changed. Before confirming, ask the User "
+        "for the label's kcal and Macros per 100 g and save them with set_my_food_nutrition, or "
+        "confirm with keep_current=true if they don't have them."
+    )
+    label: Amounts | None = Field(description="The User's label values for the amount logged.")
+    difference: Amounts | None = Field(description="The logged values minus the label's.")
+
+    @classmethod
+    def of(cls, my_food: MyFood, logged: Nutrition) -> MyFoodDetails:
+        label = my_food.label_for_amount
+
+        return cls(
+            times_logged=my_food.times_logged,
+            last_logged=my_food.last_logged,
+            needs_review=my_food.needs_review,
+            label=Amounts.of(label) if label is not None else None,
+            difference=Amounts.of(logged - label) if label is not None else None,
+        )
+
+
+class MyFoodMatch(BaseModel):
+    food_id: str
+    serving_id: str
+    name: str
+    brand: str | None
+    serving: str | None
+    metric_amount: float | None = Field(description="Grams or ml in one Serving, when known.")
+    metric_unit: str | None
+    per_serving: Amounts = Field(description="What FatSecret logs for one Serving, as last logged.")
+    per_100: Amounts | None = Field(description="The same per 100 g or ml, when the weight is known.")
+    label_per_100: Amounts | None = Field(description="The User's own label values per 100 g or ml.")
+    times_logged: int
+    last_logged: date
+    regional: bool | None = Field(
+        description="True when FatSecret's catalog can't return it, so search_foods won't find it."
+    )
+    needs_review: bool
+
+    @classmethod
+    def of(cls, item: CatalogItem) -> MyFoodMatch:
+        per_100 = _per_100(item, item.per_serving)
+        label = item.label_per_serving
+
+        return cls(
+            food_id=item.food_id,
+            serving_id=item.serving_id,
+            name=item.name,
+            brand=item.brand,
+            serving=item.serving_description,
+            metric_amount=item.metric_amount,
+            metric_unit=item.metric_unit,
+            per_serving=Amounts.of(item.per_serving),
+            per_100=Amounts.of(per_100) if per_100 is not None else None,
+            label_per_100=Amounts.of(_per_100(item, label) or label) if label is not None else None,
+            times_logged=item.times_logged,
+            last_logged=item.last_seen,
+            regional=item.is_regional,
+            needs_review=item.needs_review,
+        )
+
+
+class MyFoodSearch(BaseModel):
+    status: Literal["found", "not_found"]
+    matches: list[MyFoodMatch]
+
+
+class MyFoodNutritionInput(BaseModel):
+    """kcal and Macros from the product's label."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kcal: float = Field(ge=0, le=900, allow_inf_nan=False)
+    protein: float = Field(ge=0, le=100, allow_inf_nan=False)
+    fat: float = Field(ge=0, le=100, allow_inf_nan=False)
+    carbohydrate: float = Field(ge=0, le=100, allow_inf_nan=False)
+
+    def as_nutrition(self) -> Nutrition:
+        return Nutrition(kcal=self.kcal, protein=self.protein, fat=self.fat, carbohydrate=self.carbohydrate)
+
+
 class ProposedEntry(BaseModel):
     food_id: str
     serving_id: str
@@ -467,6 +591,9 @@ class ProposedEntry(BaseModel):
     )
     repeated_from: RepeatedFromDetails | None = Field(
         description="Set when the entry repeats a Food Entry from the Food Diary, not a new match."
+    )
+    my_food: MyFoodDetails | None = Field(
+        default=None, description="Set when the entry logs a Food from the User's own catalog."
     )
 
     @classmethod
@@ -490,6 +617,7 @@ class ProposedEntry(BaseModel):
             catalog_name=item.catalog_name,
             stand_in=stand_in,
             repeated_from=repeated_from,
+            my_food=MyFoodDetails.of(item.my_food, item.nutrition) if item.my_food is not None else None,
         )
 
 
@@ -677,6 +805,13 @@ def _repeated_from_details(item: DraftItem) -> RepeatedFromDetails | None:
         return None
 
     return RepeatedFromDetails.of(item.repeated_from)
+
+
+def _per_100(item: CatalogItem, per_serving: Nutrition | None) -> Nutrition | None:
+    if per_serving is None or item.metric_amount is None or item.metric_amount <= 0:
+        return None
+
+    return per_serving.scaled(100 / item.metric_amount)
 
 
 def _change_kind(change: EntryChange) -> ChangeKind:
