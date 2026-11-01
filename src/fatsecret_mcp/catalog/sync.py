@@ -22,7 +22,13 @@ import anyio
 from fatsecret_mcp.catalog.items import Spread, observation
 from fatsecret_mcp.catalog.store import CatalogStore, SyncMode, SyncPhase, SyncState
 from fatsecret_mcp.domain.models import Nutrition
-from fatsecret_mcp.fatsecret.errors import DailyQuotaExceeded, FatSecretError, NotFound, TooManyActions
+from fatsecret_mcp.fatsecret.errors import (
+    BudgetSpent,
+    DailyQuotaExceeded,
+    FatSecretError,
+    NotFound,
+    TooManyActions,
+)
 from fatsecret_mcp.fatsecret.gateway import AccessToken, FatSecretGateway
 
 DEFAULT_BUDGET = 3000
@@ -45,8 +51,16 @@ class BudgetReached(SyncStopped):
 
 
 class StillThrottled(SyncStopped):
+    def __init__(self, pauses: int) -> None:
+        if pauses:
+            super().__init__(f"FatSecret kept answering error 12 after {pauses} pauses")
+        else:
+            super().__init__("FatSecret answered error 12 (too many actions); try again in a few minutes")
+
+
+class UserBudgetSpent(SyncStopped):
     def __init__(self) -> None:
-        super().__init__(f"FatSecret kept answering error 12 after {THROTTLE_RETRIES} pauses")
+        super().__init__("this User's daily share of FatSecret requests is spent")
 
 
 class QuotaReached(SyncStopped):
@@ -81,6 +95,7 @@ class CatalogSync:
         budget: int = DEFAULT_BUDGET,
         sleep: Callable[[float], Awaitable[None]] = anyio.sleep,
         progress: Callable[[str], None] = lambda _: None,
+        throttle_retries: int = THROTTLE_RETRIES,
     ) -> None:
         if budget <= 0:
             raise ValueError("A sync needs a budget of at least one request.")
@@ -92,6 +107,7 @@ class CatalogSync:
         self._budget = budget
         self._sleep = sleep
         self._progress = progress
+        self._throttle_retries = throttle_retries
         self.report = RunReport()
 
     async def sync(self, today: date, *, full: bool = False) -> RunReport:
@@ -250,8 +266,9 @@ class CatalogSync:
     async def _send[T](self, request: Callable[[], Awaitable[T]]) -> T:
         """One request within the budget, sent again after a growing pause while FatSecret throttles."""
         backoff = FIRST_BACKOFF_SECONDS
+        pauses = 0
 
-        for _ in range(THROTTLE_RETRIES + 1):
+        while True:
             if self.report.requests >= self._budget:
                 raise BudgetReached(self._budget)
 
@@ -262,13 +279,19 @@ class CatalogSync:
                     self.report.requests += 1
                     self.report.throttled += 1
 
+                if pauses >= self._throttle_retries:
+                    raise StillThrottled(pauses) from None
+
                 self._progress(f"FatSecret: too many actions; waiting {backoff:.0f} s")
                 await self._sleep(backoff)
                 backoff *= 2
+                pauses += 1
                 continue
             except DailyQuotaExceeded as error:
                 self.report.requests += int(error.sent)
                 raise QuotaReached() from None
+            except BudgetSpent:
+                raise UserBudgetSpent() from None
             except FatSecretError as error:
                 self.report.requests += int(error.sent)
                 raise
@@ -276,5 +299,3 @@ class CatalogSync:
             self.report.requests += 1
 
             return result
-
-        raise StillThrottled()

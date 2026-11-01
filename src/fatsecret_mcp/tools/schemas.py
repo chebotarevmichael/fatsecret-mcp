@@ -557,6 +557,14 @@ class MyFoodSearch(BaseModel):
     matches: list[MyFoodMatch]
 
 
+class MyFoodsSynced(BaseModel):
+    status: Literal["synced", "stopped"]
+    stopped_because: str | None = Field(description="Why it stopped early; what it read is kept.")
+    days_read: int
+    requests: int
+    new: list[MyFoodMatch] = Field(description="Foods and Servings new to the catalog.")
+
+
 class MyFoodNutritionInput(BaseModel):
     """kcal and Macros from the product's label."""
 

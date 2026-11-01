@@ -63,6 +63,7 @@ async def _serve_stdio(household: Household, user: User, catalog: CatalogStore |
             daily_requests=daily_budget(len(household.users)),
             food_cache=food_cache,
             catalog=catalog,
+            refresh_catalog_daily=True,
         )
 
         await server.run_stdio_async()

@@ -219,6 +219,7 @@ class _UserServers:
             food_cache=self.food_cache,
             icons=server_icons(self.auth.identity.base_url),
             catalog=self.catalog,
+            refresh_catalog_daily=True,
         )
         security = TransportSecuritySettings(
             allowed_hosts=[urlsplit(self.auth.identity.base_url).netloc],

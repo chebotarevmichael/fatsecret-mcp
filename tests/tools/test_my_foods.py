@@ -16,6 +16,7 @@ from mcp import Client
 
 from fatsecret_mcp.catalog.items import observation
 from fatsecret_mcp.catalog.store import CatalogStore
+from fatsecret_mcp.catalog.sync import CatalogSync
 from fatsecret_mcp.config.models import Household
 from fatsecret_mcp.domain.models import FoodEntry, Meal
 from fatsecret_mcp.fatsecret.budget import daily_budget
@@ -206,3 +207,34 @@ def _entry(name: str, day: date, *, kcal: float, grams: float, food_id: str, ser
         serving_id=serving_id,
         number_of_units=grams / 100,
     )
+
+
+async def test_sync_my_foods_needs_the_first_sync_from_the_command_line(
+    connect_with: Callable[[], Client],
+) -> None:
+    async with connect_with() as client:
+        result = await client.call_tool("sync_my_foods", {})
+
+    assert result.is_error
+    assert "sync-catalog" in str(result.content)
+
+
+async def test_sync_my_foods_finds_a_food_just_logged_in_the_app(
+    connect_with: Callable[[], Client], catalog: CatalogStore, fatsecret: FakeFatSecret, household: Household
+) -> None:
+    user = household.user("jakub").fatsecret
+    await CatalogSync(fatsecret, catalog, "jakub", user, sleep=_no_wait).sync(date(2026, 10, 12))
+    fatsecret.add_food_entry(
+        user, _entry("Айран", date(2026, 10, 13), kcal=40, grams=100, food_id="a", serving_id="b")
+    )
+
+    async with connect_with() as client:
+        synced = await _call(client, "sync_my_foods", {})
+        found = await _call(client, "search_my_foods", {"description": "айран"})
+
+    assert synced["status"] == "synced"
+    assert [food["name"] for food in synced["new"]] == ["Айран"]
+    assert found["matches"][0]["food_id"] == "a"
+
+
+async def _no_wait(_: float) -> None: ...

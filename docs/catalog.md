@@ -27,7 +27,9 @@ When the catalog file exists, `serve` opens it and offers two more tools; withou
 
 `catalog.lookup.catalog_food` fetches a Food from FatSecret's catalog only when a tool needs more than the catalog holds, and remembers a regional Food so it isn't requested again.
 
-Run `sync-catalog` now and then, or after logging in the app, to pick up new Foods; the server reads the catalog but doesn't sync it.
+- `sync_my_foods` reads the days since shortly before the last sync, usually a few requests, and lists the Foods new to the catalog. Ask for it after logging something new in the app. It doesn't wait out error 12: it stops at once, so ask again in a few minutes.
+
+While it runs, the server also refreshes the catalog once each Diary Day by itself, waiting out error 12 as `sync-catalog` does. Neither starts the first, full sync: run `sync-catalog` once for that.
 
 ## What it keeps
 

@@ -6,10 +6,12 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 
+import anyio
 from mcp.server import MCPServer
 from mcp.types import Icon
 from pydantic import SecretStr
 
+from fatsecret_mcp.catalog.freshness import CatalogRefresher
 from fatsecret_mcp.catalog.store import CatalogStore
 from fatsecret_mcp.config.models import User
 from fatsecret_mcp.domain.diary_day import Clock, system_clock
@@ -26,6 +28,7 @@ from fatsecret_mcp.tools import (
     search_foods,
     search_my_foods,
     set_my_food_nutrition,
+    sync_my_foods,
 )
 from fatsecret_mcp.tools.schemas import ATTRIBUTION
 
@@ -81,7 +84,8 @@ MY_FOODS_INSTRUCTIONS = """\
 products search_foods can't find. Search it first for anything the User may have eaten before, then \
 search_foods. Draft a match as a My Food item. When its needs_review is true, ask for the label's kcal \
 and Macros per 100 g before confirming and save them with set_my_food_nutrition, or keep_current=true \
-when the User doesn't have them.
+when the User doesn't have them. When the User says they logged something new in the FatSecret app, \
+or a Food they logged there isn't found, call sync_my_foods and search again.
 """
 
 
@@ -102,13 +106,15 @@ def build_server(
     food_cache: FoodCache,
     icons: list[Icon] | None = None,
     catalog: CatalogStore | None = None,
+    refresh_catalog_daily: bool = False,
 ) -> MCPServer:
     """The MCP server acting as `user`: it reads their diary and writes the Drafts they confirm.
 
     Every FatSecret request it makes counts towards the User's `daily_requests`. Foods come from
     `food_cache`, which the server's owner shares between Users and keeps running. `icons` need the
     server's public URL, so only the remote connector has them. With a `catalog`, the User's own
-    logged Foods can be searched and logged too.
+    logged Foods can be searched and logged too, and refreshed from the Food Diary on request and, with
+    `refresh_catalog_daily`, once a day while the server runs.
     """
     budget = DailyBudget(
         requests=daily_requests,
@@ -126,10 +132,28 @@ def build_server(
         clock=clock,
     )
 
+    refresher = None
+
+    if catalog is not None:
+        refresher = CatalogRefresher(
+            store=catalog,
+            user_id=user.id,
+            fatsecret=budgeted,
+            token=user.fatsecret,
+            timezone=user.timezone,
+            clock=clock,
+        )
+
     @asynccontextmanager
     async def lifespan(_server: MCPServer) -> AsyncGenerator[None]:
-        async with diary.cache_lifespan():
-            yield
+        async with diary.cache_lifespan(), anyio.create_task_group() as group:
+            if refresher is not None and refresh_catalog_daily:
+                group.start_soon(refresher.refresh_daily)
+
+            try:
+                yield
+            finally:
+                group.cancel_scope.cancel()
 
     server = MCPServer(
         name="fatsecret-mcp",
@@ -148,8 +172,9 @@ def build_server(
     draft_entries.register(server, user, budgeted, food_cache, diary, clock, signing_key, catalog)
     confirm_draft.register(server, user, budgeted, diary, clock, signing_key)
 
-    if catalog is not None:
+    if catalog is not None and refresher is not None:
         search_my_foods.register(server, user, catalog)
         set_my_food_nutrition.register(server, user, catalog, clock)
+        sync_my_foods.register(server, refresher)
 
     return server
