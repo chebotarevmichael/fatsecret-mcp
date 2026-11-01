@@ -129,7 +129,8 @@ class CatalogSync:
 
         for spread in self.report.spreads:
             logger.warning(
-                "Food %s Serving %s (%s): %d entries give %.0f-%.0f kcal per Serving, median %.0f",
+                "Food %s Serving %s (%s): %d entries give %.0f-%.0f kcal per Serving, median %.0f, "
+                "latest %.0f%s",
                 spread.food_id,
                 spread.serving_id,
                 spread.name,
@@ -137,6 +138,8 @@ class CatalogSync:
                 spread.lowest_kcal,
                 spread.highest_kcal,
                 spread.median_kcal,
+                spread.latest_kcal,
+                "; needs review" if spread.doubtful else "",
             )
 
         return self.report

@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from fatsecret_mcp.catalog.items import Observation, brand, catalog_item, observation
+from fatsecret_mcp.catalog.items import NutritionSource, Observation, brand, catalog_item, observation
 from fatsecret_mcp.domain.models import Meal, Nutrition
 from fatsecret_mcp.fatsecret import parsing
 from tests.fatsecret.fake import food_entry
@@ -57,20 +57,46 @@ def test_an_entry_without_units_isnt_a_logging() -> None:
     assert observation(entry) is None
 
 
-def test_the_median_of_loggings_is_kept_and_the_latest_name() -> None:
+def test_loggings_that_agree_keep_their_median() -> None:
     loggings = [
-        _logged("Kurt", DAY.replace(day=1), kcal=260, units=0.13),
-        _logged("Kurt", DAY.replace(day=2), kcal=262, units=0.2),
-        _logged("Курт Домашний", DAY.replace(day=3), kcal=900, units=1),
+        _logged("Kurt", date(2026, 11, 1), kcal=260, units=0.13),
+        _logged("Kurt", date(2026, 11, 2), kcal=262, units=0.2),
+        _logged("Курт Домашний", date(2026, 11, 3), kcal=261, units=1),
     ]
 
     item, spread = catalog_item(loggings)
 
-    assert item.per_serving.kcal == 262
+    assert spread is None
+    assert (item.per_serving.kcal, item.source, item.needs_review) == (261, NutritionSource.MEDIAN, False)
     assert item.name == "Курт Домашний"
     assert (item.times_logged, item.first_seen, item.last_seen) == (3, date(2026, 11, 1), date(2026, 11, 3))
+
+
+def test_changed_data_keeps_the_latest_loggings_and_asks_for_review() -> None:
+    # The Food's data changed on FatSecret: 113 kcal for months, then 169.
+    loggings = [_logged("Grudka", date(2026, 5, day), kcal=113, units=1) for day in range(1, 8)]
+    loggings += [
+        _logged("Grudka", date(2026, 10, 1), kcal=169, units=1),
+        _logged("Grudka", date(2026, 10, 2), kcal=170, units=1),
+    ]
+
+    item, spread = catalog_item(loggings)
+
     assert spread is not None
-    assert (spread.lowest_kcal, spread.highest_kcal, spread.entries) == (260, 900, 3)
+    assert (spread.median_kcal, spread.latest_kcal, spread.latest_entries) == (113, 169.5, 2)
+    assert spread.doubtful
+    assert (item.per_serving.kcal, item.source, item.needs_review) == (169.5, NutritionSource.LATEST, True)
+
+
+def test_one_old_odd_logging_keeps_the_latest_without_review() -> None:
+    loggings = [_logged("Pepsi", date(2026, 3, 1), kcal=45, units=1)]
+    loggings += [_logged("Pepsi", date(2026, 6, day), kcal=28, units=1) for day in range(1, 6)]
+
+    item, spread = catalog_item(loggings)
+
+    assert spread is not None
+    assert not spread.doubtful
+    assert (item.per_serving.kcal, item.needs_review) == (28, False)
 
 
 def test_rounding_of_tiny_entries_isnt_a_disagreement() -> None:

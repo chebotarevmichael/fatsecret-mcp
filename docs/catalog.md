@@ -22,9 +22,16 @@ It needs `FATSECRET_CONSUMER_KEY`, `FATSECRET_CONSUMER_SECRET` and `FATSECRET_MC
 One SQLite file, `catalog.sqlite3`, in `FATSECRET_MCP_DATA_DIR` (by default `./data`; `/data` in the container image, which declares it a volume).
 
 - `catalog_entries`: each Food Entry read, with nutrition for one Serving (the entry's divided by its units).
-- `catalog_items`: one row per person, Food and Serving: the latest entry name, a brand when the name starts with one in capitals, the Serving's description and its grams or ml when the entry was written in them, the median nutrition per Serving, how often and when it was logged, and whether it is regional (empty until checked).
+- `catalog_items`: one row per person, Food and Serving: the latest entry name, a brand when the name starts with one in capitals, the Serving's description and its grams or ml when the entry was written in them, the nutrition per Serving, where it came from, how often and when it was logged, and whether it is regional (empty until checked).
+- `catalog_overrides`: nutrition per Serving you gave yourself.
 - `food_checks`, `sync_days`, `sync_state`: the regional checks and how far a sync got.
 
-FatSecret rounds each entry's kcal, so entries of a few grams disagree by a few kcal per Serving. Wider disagreements are logged as warnings.
+## Which nutrition is kept
+
+FatSecret rounds each entry's kcal, so entries of a few grams disagree by a few kcal per Serving.
+
+- When every logging agrees within that rounding, the median is kept (`source` is `median`).
+- When they disagree beyond it, the Food's data most likely changed on FatSecret, so the latest loggings that agree with each other are kept (`latest`). If those differ from the median too, the Item is marked `needs_review` and logged as a warning.
+- Values you give for a Serving are kept in `catalog_overrides` and win over the entries in every later rebuild (`override`).
 
 The catalog is persistent, unlike the rest of this server, which keeps FatSecret data in memory for at most a day. It is meant for your own diary on your own server.

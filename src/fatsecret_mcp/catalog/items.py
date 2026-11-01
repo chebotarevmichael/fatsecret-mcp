@@ -2,7 +2,9 @@
 
 A Food Entry holds nutrition for its number of units of a Serving, so one Serving's nutrition is the
 entry's divided by its units. FatSecret rounds each entry's kcal, so entries of a few grams disagree
-by a few kcal per Serving; the median of all entries is kept, and wider spreads are reported.
+by a few kcal per Serving, and their median is kept. When they disagree beyond rounding, the Food's
+data most likely changed on FatSecret, so the latest loggings are kept instead; if those differ from
+the median, the Item needs review by the User, whose own values then override both.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
+from enum import StrEnum
 from statistics import median
 
 from fatsecret_mcp.domain.entry_amounts import positive
@@ -25,6 +28,15 @@ SPREAD_SHARE = 0.05
 """Per-Serving kcal are reported when they differ by this share of their median beyond rounding."""
 ROUNDING_KCAL = 0.5
 """FatSecret rounds an entry's kcal to a whole number, so one Serving's kcal are off by up to this / units."""
+
+
+class NutritionSource(StrEnum):
+    MEDIAN = "median"
+    """Every logging agrees within rounding."""
+    LATEST = "latest"
+    """Loggings disagree: the latest ones that agree with each other."""
+    OVERRIDE = "override"
+    """Values the User gave."""
 
 
 @dataclass(frozen=True)
@@ -58,6 +70,9 @@ class CatalogItem:
     times_logged: int
     first_seen: date
     last_seen: date
+    source: NutritionSource = NutritionSource.MEDIAN
+    needs_review: bool = False
+    """Loggings disagree and the latest differ from their median: the User should confirm the values."""
     is_regional: bool | None = None
     """True when FatSecret's catalog can't return the Food to this API key; None until checked."""
 
@@ -72,7 +87,12 @@ class Spread:
     lowest_kcal: float
     highest_kcal: float
     median_kcal: float
+    latest_kcal: float
+    latest_entries: int
+    """How many of the latest loggings agree with the most recent one."""
     entries: int
+    doubtful: bool
+    """The latest kcal differ from the median beyond rounding."""
 
 
 def observation(entry: FoodEntry) -> Observation | None:
@@ -112,12 +132,8 @@ def catalog_item(observations: Sequence[Observation]) -> tuple[CatalogItem, Spre
 
     by_day = sorted(observations, key=lambda logged: (logged.diary_day, logged.food_entry_id))
     latest = by_day[-1]
-    per_serving = Nutrition(
-        kcal=median(logged.per_serving.kcal for logged in by_day),
-        protein=median(logged.per_serving.protein for logged in by_day),
-        fat=median(logged.per_serving.fat for logged in by_day),
-        carbohydrate=median(logged.per_serving.carbohydrate for logged in by_day),
-    )
+    overall = _median(by_day)
+    spread = _spread(by_day, overall)
     metric = [logged for logged in by_day if logged.metric_amount is not None]
     amounts = [logged.metric_amount for logged in metric if logged.metric_amount is not None]
     metric_amount = median(amounts) if amounts else None
@@ -132,13 +148,15 @@ def catalog_item(observations: Sequence[Observation]) -> tuple[CatalogItem, Spre
         serving_description=description,
         metric_amount=metric_amount,
         metric_unit=metric_unit,
-        per_serving=per_serving,
+        per_serving=overall if spread is None else _median(_latest_agreeing(by_day)),
         times_logged=len(by_day),
         first_seen=by_day[0].diary_day,
         last_seen=latest.diary_day,
+        source=NutritionSource.MEDIAN if spread is None else NutritionSource.LATEST,
+        needs_review=spread is not None and spread.doubtful,
     )
 
-    return item, _spread(item, by_day)
+    return item, spread
 
 
 def brand(name: str) -> str | None:
@@ -188,21 +206,62 @@ def _serving_description(amount: str, number_of_units: float) -> str | None:
     return rest
 
 
-def _spread(item: CatalogItem, observations: Sequence[Observation]) -> Spread | None:
-    lowest = min(observations, key=lambda logged: logged.per_serving.kcal)
-    highest = max(observations, key=lambda logged: logged.per_serving.kcal)
-    width = highest.per_serving.kcal - lowest.per_serving.kcal
-    rounding = ROUNDING_KCAL / lowest.number_of_units + ROUNDING_KCAL / highest.number_of_units
+def _median(observations: Sequence[Observation]) -> Nutrition:
+    return Nutrition(
+        kcal=median(logged.per_serving.kcal for logged in observations),
+        protein=median(logged.per_serving.protein for logged in observations),
+        fat=median(logged.per_serving.fat for logged in observations),
+        carbohydrate=median(logged.per_serving.carbohydrate for logged in observations),
+    )
 
-    if width <= rounding + SPREAD_SHARE * item.per_serving.kcal:
+
+def _latest_agreeing(by_day: Sequence[Observation]) -> list[Observation]:
+    """The most recent logging and those right before it that agree with it within rounding."""
+    latest = by_day[-1]
+    agreeing = [latest]
+
+    for logged in reversed(by_day[:-1]):
+        if not _agree(logged, latest):
+            break
+
+        agreeing.append(logged)
+
+    return agreeing
+
+
+def _agree(first: Observation, second: Observation) -> bool:
+    width = abs(first.per_serving.kcal - second.per_serving.kcal)
+    larger = max(first.per_serving.kcal, second.per_serving.kcal)
+
+    return width <= _rounding(first) + _rounding(second) + SPREAD_SHARE * larger
+
+
+def _rounding(logged: Observation) -> float:
+    return ROUNDING_KCAL / logged.number_of_units
+
+
+def _spread(by_day: Sequence[Observation], overall: Nutrition) -> Spread | None:
+    lowest = min(by_day, key=lambda logged: logged.per_serving.kcal)
+    highest = max(by_day, key=lambda logged: logged.per_serving.kcal)
+    width = highest.per_serving.kcal - lowest.per_serving.kcal
+
+    if width <= _rounding(lowest) + _rounding(highest) + SPREAD_SHARE * overall.kcal:
         return None
 
+    latest_agreeing = _latest_agreeing(by_day)
+    latest_kcal = _median(latest_agreeing).kcal
+    latest = by_day[-1]
+    doubtful = abs(latest_kcal - overall.kcal) > 2 * _rounding(latest) + SPREAD_SHARE * overall.kcal
+
     return Spread(
-        food_id=item.food_id,
-        serving_id=item.serving_id,
-        name=item.name,
+        food_id=latest.food_id,
+        serving_id=latest.serving_id,
+        name=latest.name,
         lowest_kcal=lowest.per_serving.kcal,
         highest_kcal=highest.per_serving.kcal,
-        median_kcal=item.per_serving.kcal,
-        entries=len(observations),
+        median_kcal=overall.kcal,
+        latest_kcal=latest_kcal,
+        latest_entries=len(latest_agreeing),
+        entries=len(by_day),
+        doubtful=doubtful,
     )
