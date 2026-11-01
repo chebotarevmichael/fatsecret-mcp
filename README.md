@@ -202,6 +202,10 @@ ChatGPT sometimes stops a confirmed change or removal with "This tool call was b
 
 Report vulnerabilities through [SECURITY.md](https://github.com/jaronskijakub/fatsecret-mcp/blob/main/SECURITY.md), which also describes the trust model and what is stored where.
 
+## Local catalog
+
+`fatsecret-mcp sync-catalog` keeps a local catalog of everything you have logged, including foods the free API key can't search or fetch, such as regional brands; `docs/catalog.md` describes it.
+
 ## Roadmap
 
 - Custom foods for users with a FatSecret Premier key, so a branded product can be logged with exact values instead of a stand-in.

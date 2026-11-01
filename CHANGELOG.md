@@ -2,6 +2,12 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `fatsecret-mcp sync-catalog`: a local catalog of the Foods and Servings each person has logged, read from their own Food Diary into SQLite in `FATSECRET_MCP_DATA_DIR`. It covers Foods a Basic key can't search or fetch, such as regional Brand Foods, and `--classify` marks which ones those are. See [docs/catalog.md](docs/catalog.md).
+
 ## [0.3.0] - 2026-10-29
 
 ### Added

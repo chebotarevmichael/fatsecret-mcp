@@ -1,6 +1,9 @@
 # Local secrets
 .env
 
+# The catalog of logged Foods (FATSECRET_MCP_DATA_DIR)
+data/
+
 # Python
 __pycache__/
 *.py[cod]

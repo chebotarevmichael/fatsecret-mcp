@@ -24,7 +24,7 @@ Don't join a server whose Operator you wouldn't give your FatSecret password to.
 | Drafts | Signed ids held by the app; the server stores nothing | Thirty minutes |
 | Connector access and refresh tokens | Held by the app, signed by the server | One hour and thirty days |
 
-There is no database and nothing is written to disk. Drafts carry entry names, ids, units, meal, day and person, but no nutrition values. HTTP access logs are off, because sign-in URLs carry one-time codes. The server's own log lines name FatSecret methods, error types and error codes, not diary contents or credentials.
+The server itself writes nothing to disk. The `sync-catalog` command keeps one SQLite file in `FATSECRET_MCP_DATA_DIR`: the Foods and Servings each person has logged, with nutrition per Serving, read from their own Food Diary; see [docs/catalog.md](docs/catalog.md). It holds no credentials, but it does hold diary history, so keep its volume private. Drafts carry entry names, ids, units, meal, day and person, but no nutrition values. HTTP access logs are off, because sign-in URLs carry one-time codes. The server's own log lines name FatSecret methods, error types and error codes, not diary contents or credentials.
 
 ## Revoking access
 
