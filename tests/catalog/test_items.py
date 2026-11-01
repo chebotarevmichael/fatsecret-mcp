@@ -51,6 +51,26 @@ def test_a_serving_without_grams_keeps_its_measure() -> None:
     assert logged.per_serving.kcal == 105
 
 
+@pytest.mark.parametrize(
+    ("amount", "units", "description", "grams"),
+    [
+        ("2 шоколадка, 23,5 г", 2, "шоколадка, 23,5 г", 23.5),
+        ("1 порция (30 г)", 1, "порция (30 г)", 30),
+        ("0,5 стакан (300 мл)", 0.5, "стакан (300 мл)", 300),
+        ("1,5 г", 1.5, "1 g", 1),
+        ("1 mug", 1, "mug", None),
+    ],
+)
+def test_a_servings_weight_is_read_from_its_description(
+    amount: str, units: float, description: str, grams: float | None
+) -> None:
+    entry = food_entry("Kinder Country", Meal.SNACKS, DAY, kcal=100, amount=amount, number_of_units=units)
+    logged = observation(entry)
+
+    assert logged is not None
+    assert (logged.serving_description, logged.metric_amount) == (description, grams)
+
+
 def test_an_entry_without_units_isnt_a_logging() -> None:
     entry = food_entry("Water", Meal.SNACKS, DAY, kcal=0, amount="0 g", number_of_units=0)
 

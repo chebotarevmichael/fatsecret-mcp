@@ -21,8 +21,13 @@ from fatsecret_mcp.domain.models import FoodEntry, Nutrition
 
 # Grams and millilitres as FatSecret writes them in English and in Russian (g, gr, ml in Cyrillic).
 METRIC_UNITS = {"g": "g", "\u0433": "g", "\u0433\u0440": "g", "ml": "ml", "\u043c\u043b": "ml"}
-METRIC_AMOUNT = re.compile(rf"(?P<amount>\d+(?:\.\d+)?) ?(?P<unit>{'|'.join(METRIC_UNITS)})\.?")
-LEADING_NUMBER = re.compile(r"(?P<number>\d+(?:\.\d+)?)\s*(?P<rest>.*)")
+# The Russian app writes decimals with a comma: "23,5 g".
+NUMBER = r"\d+(?:[.,]\d+)?"
+UNIT = "|".join(METRIC_UNITS)
+METRIC_AMOUNT = re.compile(rf"(?P<amount>{NUMBER}) ?(?P<unit>{UNIT})\.?")
+# A Serving's own weight in its description: "bar, 23,5 g", "portion (30 g)", "cup (240 ml)".
+SERVING_WEIGHT = re.compile(rf"(?<![\d.,])(?P<amount>{NUMBER}) ?(?P<unit>{UNIT})\b")
+LEADING_NUMBER = re.compile(rf"(?P<number>{NUMBER})\s+(?P<rest>.*)")
 
 SPREAD_SHARE = 0.05
 """Per-Serving kcal are reported when they differ by this share of their median beyond rounding."""
@@ -105,7 +110,8 @@ def observation(entry: FoodEntry) -> Observation | None:
 
     if metric is None:
         description = _serving_description(entry.amount, entry.number_of_units)
-        metric_amount = metric_unit = None
+        weight = serving_weight(description)
+        metric_amount, metric_unit = weight if weight is not None else (None, None)
     else:
         amount, metric_unit = metric
         metric_amount = amount / entry.number_of_units
@@ -180,12 +186,28 @@ def _capitalised(word: str) -> bool:
 
 
 def _metric(amount: str) -> tuple[float, str] | None:
-    match = METRIC_AMOUNT.fullmatch(amount.strip().lower())
+    """The whole entry's grams or ml, when its amount is written in them: "150 g", "39 g"."""
+    return _weight(METRIC_AMOUNT.fullmatch(amount.strip().lower()))
 
-    if match is None or not positive(float(match["amount"])):
+
+def serving_weight(description: str | None) -> tuple[float, str] | None:
+    """One Serving's grams or ml, when its description names them: "portion (30 g)" is 30 g."""
+    if description is None:
         return None
 
-    return float(match["amount"]), METRIC_UNITS[match["unit"]]
+    return _weight(SERVING_WEIGHT.search(description.lower()))
+
+
+def _weight(match: re.Match[str] | None) -> tuple[float, str] | None:
+    if match is None:
+        return None
+
+    amount = float(match["amount"].replace(",", "."))
+
+    if not positive(amount):
+        return None
+
+    return amount, METRIC_UNITS[match["unit"]]
 
 
 def _serving_description(amount: str, number_of_units: float) -> str | None:
@@ -200,7 +222,7 @@ def _serving_description(amount: str, number_of_units: float) -> str | None:
     if not rest:
         return None
 
-    if number_of_units != 1 and rest.endswith("s") and float(match["number"]) == number_of_units:
+    if number_of_units != 1 and rest.endswith("s") and _number(match["number"]) == number_of_units:
         rest = rest.removesuffix("s")
 
     return rest
@@ -265,3 +287,7 @@ def _spread(by_day: Sequence[Observation], overall: Nutrition) -> Spread | None:
         entries=len(by_day),
         doubtful=doubtful,
     )
+
+
+def _number(text: str) -> float:
+    return float(text.replace(",", "."))

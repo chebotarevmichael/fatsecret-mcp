@@ -22,7 +22,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from fatsecret_mcp.catalog.items import CatalogItem, NutritionSource, Observation, Spread, catalog_item
+from fatsecret_mcp.catalog.items import (
+    CatalogItem,
+    NutritionSource,
+    Observation,
+    Spread,
+    catalog_item,
+    serving_weight,
+)
 from fatsecret_mcp.domain.models import Nutrition
 
 DATA_DIR_VAR = "FATSECRET_MCP_DATA_DIR"
@@ -389,6 +396,13 @@ class CatalogStore:
 
 
 def _observation(row: sqlite3.Row) -> Observation:
+    metric_amount, metric_unit = row["metric_amount"], row["metric_unit"]
+
+    if metric_amount is None:
+        # Entries kept before Serving weights were read from descriptions get them on every rebuild.
+        weight = serving_weight(row["serving_description"])
+        metric_amount, metric_unit = weight if weight is not None else (None, None)
+
     return Observation(
         food_entry_id=row["food_entry_id"],
         food_id=row["food_id"],
@@ -397,8 +411,8 @@ def _observation(row: sqlite3.Row) -> Observation:
         name=row["name"],
         number_of_units=row["number_of_units"],
         serving_description=row["serving_description"],
-        metric_amount=row["metric_amount"],
-        metric_unit=row["metric_unit"],
+        metric_amount=metric_amount,
+        metric_unit=metric_unit,
         per_serving=_nutrition(row),
     )
 
