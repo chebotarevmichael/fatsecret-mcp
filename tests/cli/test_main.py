@@ -1,4 +1,4 @@
-"""The command line: three commands, and configuration problems stop it with a clear message."""
+"""The command line: four commands, and configuration problems stop it with a clear message."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def configure(monkeypatch: pytest.MonkeyPatch, **overrides: str) -> None:
         monkeypatch.setenv(name, value)
 
 
-@pytest.mark.parametrize("argv", [[], ["serve"], ["add-user"], ["check"]])
+@pytest.mark.parametrize("argv", [[], ["serve"], ["add-user"], ["check"], ["sync-catalog"]])
 def test_every_command_names_missing_configuration(argv: list[str]) -> None:
     with pytest.raises(SystemExit) as stopped:
         main(argv)
